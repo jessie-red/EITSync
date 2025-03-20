@@ -225,6 +225,7 @@ class TeensySerialManager:
                 else:
                     self.data_dict[data_dict_entry].append((linux_time, data)) # np.array(combined_data), 0-63 is eit, 64-67 is quat, 68-70 is acc, 71-73 is gyr, 74-76 is mag
 
+
     def get_recent_data(self):
         list_recent_data = list(self.recent_data)
         # print(self.recent_data)

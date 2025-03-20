@@ -14,6 +14,102 @@ import asyncio
 import os
 
 
+class SimplePoints3DViewer(gl.GLViewWidget):
+    """
+    A minimalist 3D point visualization widget that displays three points in 3D space.
+    
+    This class visualizes three 3D points, each with a different color.
+    It can be updated with new position data and integrated into existing PyQt applications.
+    """
+    
+    def __init__(self, parent=None, point_size=10, grid_size=20):
+        """
+        Initialize the 3D points viewer.
+        
+        Args:
+            parent: Parent widget
+            point_size: Size of the points
+            grid_size: Size of the grid
+        """
+        super().__init__(parent)
+        
+        self.point_size = point_size
+        
+        # Initialize the viewer
+        self._setup_viewer(grid_size)
+        
+        # Create scatter items for current positions
+        self.scatter_items = [
+            gl.GLScatterPlotItem(pos=np.array([[0, 0, 0]]), color=color, size=self.point_size)
+            for color in [(1, 0, 0, 1), (0, 1, 0, 1), (0, 0, 1, 1)]  # Red, Green, Blue
+        ]
+        
+        # Add scatter items to the view
+        for scatter in self.scatter_items:
+            self.addItem(scatter)
+    
+    def _setup_viewer(self, grid_size):
+        """Set up the 3D viewer with grid and axes."""
+        # Add coordinate grid
+        grid = gl.GLGridItem()
+        grid.setSize(grid_size, grid_size, grid_size)
+        grid.setSpacing(1, 1, 1)
+        self.addItem(grid)
+        
+        # Add coordinate axes
+        axis_x = gl.GLLinePlotItem(pos=np.array([[0, 0, 0], [10, 0, 0]]), color=(1, 0, 0, 1), width=2)
+        axis_y = gl.GLLinePlotItem(pos=np.array([[0, 0, 0], [0, 10, 0]]), color=(0, 1, 0, 1), width=2)
+        axis_z = gl.GLLinePlotItem(pos=np.array([[0, 0, 0], [0, 0, 10]]), color=(0, 0, 1, 1), width=2)
+        self.addItem(axis_x)
+        self.addItem(axis_y)
+        self.addItem(axis_z)
+    
+    def update_positions(self, positions):
+        """
+        Update the visualization with new positions.
+        
+        Args:
+            positions: List of three numpy arrays, each containing a 3D position.
+                      Each array should be shape (3,) or (1, 3) representing x, y, z coordinates.
+        """
+        if len(positions) != 3:
+            raise ValueError(f"Expected 3 position arrays, got {len(positions)}")
+        
+        for i, pos_array in enumerate(positions):
+            # Ensure the position array is the right shape
+            if len(pos_array.shape) == 1:
+                # If it's a single 1D array with 3 elements, reshape it to (1, 3)
+                if pos_array.shape[0] == 3:
+                    pos_array = pos_array.reshape(1, 3)
+                else:
+                    raise ValueError(f"Position array {i} has invalid shape: {pos_array.shape}")
+            else:
+                # If it's already 2D, ensure it's (1, 3)
+                if pos_array.shape != (1, 3):
+                    raise ValueError(f"Position array {i} must have shape (1, 3), got {pos_array.shape}")
+            
+            # Update current position
+            self.scatter_items[i].setData(pos=pos_array)
+    
+    def set_point_size(self, size):
+        """Set the size of the points."""
+        self.point_size = size
+        for scatter in self.scatter_items:
+            scatter.setData(size=size)
+    
+    def set_point_colors(self, colors):
+        """
+        Set custom colors for the three points.
+        
+        Args:
+            colors: List of three colors, each as an RGBA tuple (r, g, b, a) with values 0-1
+        """
+        if len(colors) != 3:
+            raise ValueError(f"Expected 3 colors, got {len(colors)}")
+            
+        for i, color in enumerate(colors):
+            self.scatter_items[i].setData(color=color)
+
 
 
 class GLWidget(gl.GLViewWidget):
@@ -118,11 +214,11 @@ class ArmWidget(QWidget):
         # self.view.setCameraPosition(distance=1, elevation=90, azimuth=0)  # Top-down view
 
         # Create scatter plot for joints
-        self.joints_plot = gl.GLScatterPlotItem(size=1, color=(1, 0, 0, 1), pxMode=False)
+        self.joints_plot = gl.GLScatterPlotItem(size=.1, color=(1, 0, 0, 1), pxMode=False)
         self.view.addItem(self.joints_plot)
 
         # Create line plot for bones
-        self.bones_plot = gl.GLLinePlotItem(color=(1, 1, 1, 1), width=10)
+        self.bones_plot = gl.GLLinePlotItem(color=(1, 1, 1, 1), width=1)
         self.view.addItem(self.bones_plot)
 
 
@@ -137,17 +233,16 @@ class ArmWidget(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, data_dict, start_data_collection, stop_data_collection, save_data_dict, clear_data_dict, teensybt, mobileimu):
+    def __init__(self, data_dict, save_data_dict, clear_data_dict, teensybt, mobileimu, unity):
         super().__init__()
 
         self.data_dict = data_dict
-        self.start_data_collection = start_data_collection
-        self.stop_data_collection = stop_data_collection
         self.save_data_dict = save_data_dict
         self.clear_data_dict = clear_data_dict
         #self.mphands = mphands # used for getting cv2 image from mediapipe processing
         self.teensybt = teensybt # used for getting quaternion data
         self.mobileimu = mobileimu
+        self.unity = unity
 
         self.recording_status = False
 
@@ -169,6 +264,9 @@ class MainWindow(QMainWindow):
         # Create a vertical layout and set it as the layout of the central widget
         self.vertical_layout = QVBoxLayout()
         self.central_widget.setLayout(self.vertical_layout)
+
+        self.viewer = SimplePoints3DViewer()
+        self.viewer.setMinimumSize(400,300)
 
         # Create the first row
         self.first_row_layout = QHBoxLayout()
@@ -234,10 +332,13 @@ class MainWindow(QMainWindow):
         self.imu_layout = QVBoxLayout()
         self.acc_label = QLabel()
         self.quat_label = QLabel()
+        self.body_label = QLabel()
         self.imu_layout.addWidget(self.acc_label)
         self.imu_layout.addWidget(self.quat_label)
+        self.imu_layout.addWidget(self.body_label)
         self.acc_label.setText(f"Acc: none yet")
         self.quat_label.setText(f"Quat: none yet")
+        self.body_label.setText(f"Body Length: none yet")
         self.third_row_widget_2 = GLWidget()
         self.third_row_widget_2.update_overlay_text("title", "Quest Handpose (Ground Truth)", 10, 30, self.title_font_size)
         self.third_row_widget_2.sizeHint = lambda: pg.QtCore.QSize(800, 600)  # Set a larger window size
@@ -246,7 +347,7 @@ class MainWindow(QMainWindow):
 
         
         self.third_row_layout.addLayout(self.imu_layout)
-        self.third_row_layout.addWidget(self.third_row_widget_2)
+        #self.third_row_layout.addWidget(self.viewer)
         self.third_row_layout.addWidget(self.arm_widget)
 
         self.vertical_layout.addLayout(self.third_row_layout)
@@ -270,14 +371,25 @@ class MainWindow(QMainWindow):
 
     def record_button_clicked(self, pressed):
         if pressed:
-            self.start_data_collection()
             self.recording_status = True
             self.timer_gesture = time.time()
             self.record_button.setText('Stop Recording')
+            self.teensybt.collect_data = True
+            self.mobileimu.collect_data = True
+            self.unity.collect_data = True
         else:
-            self.stop_data_collection()
             self.recording_status = False
             self.record_button.setText('Start Recording')
+            self.teensybt.collect_data = False
+            self.mobileimu.collect_data = False
+            self.unity.collect_data = False
+
+    def record_data(self):
+        linux_time = time.time()
+        self.teensybt.record_data(linux_time)
+        self.mobileimu.record_data(linux_time)
+        self.unity.record_data(linux_time)
+
 
     def save_button_clicked(self):
         # This function will be called when the stop button is clicked
@@ -305,77 +417,6 @@ class MainWindow(QMainWindow):
         self.third_row_widget_2.setGeometry(0, 0, plot_width, plot_height)
         # self.plot2.setGeometry(plot_width, 0, plot_width, plot_height)
 
-    # Example function with random hand landmarks
-    def generate_hand_landmarks(self, source_index=None):
-        # if self.data_source is None or (type(self.data_source) is list and source_index is None):
-        #     # Random hand landmark data
-        #     x = [random.uniform(-1, 1) for _ in range(21)]
-        #     y = [random.uniform(-1, 1) for _ in range(21)]
-        #     z = [random.uniform(-1, 1) for _ in range(21)]
-        #     return x, y, z
-        
-        # if type(self.data_source) is list:
-        #     data_source = self.data_source[source_index]
-        # else:
-        #     data_source = self.data_source
-
-        # joints_pos = data_source.get_joints()[0] * 10 # shape: (21, 3)
-        # fps_mediapipe = data_source.get_fps_mediapipe()
-        # # print(joints_pos)
-        fps_mediapipe = self.mphands.get_fps()
-        # print(self.data_dict[self.mphands.DATA_DICT_ENTRY][-1][2][0])
-        # joints_pos = self.data_dict[self.mphands.DATA_DICT_ENTRY][-1][2][0] * 10 # shape: (21, 3)
-        joints_pos = self.mphands.get_latest_world_hand_landmarks()[0]
-        # joints_pos = scale_mano(joints_pos, LENGTH_MANO)
-        joints_pos = joints_pos * 10
-        # print(joints_pos)
-
-        return joints_pos[:, 0].flatten(), joints_pos[:, 1].flatten(), joints_pos[:, 2].flatten(), fps_mediapipe
-
-    # Function to update the plots with new data
-    def update_plot(self, plot, x, y, z, fps_mediapipe):
-        plot.clear()
-
-        # Create scatter plot
-        scatter = gl.GLScatterPlotItem(pos=np.column_stack((x, y, z)), color=(0.5, 0.5, 0.5, 1.0), size=15)  # Increase size to 0.1
-        plot.addItem(scatter)
-
-        # Create lines for hand connections
-        connections = [(0, 1), (1, 2), (2, 3), (3, 4),  # Thumb
-                       (0, 5), (5, 6), (6, 7), (7, 8),  # Index finger
-                       (0, 9), (9, 10), (10, 11), (11, 12),  # Middle finger
-                       (0, 13), (13, 14), (14, 15), (15, 16),  # Ring finger
-                       (0, 17), (17, 18), (18, 19), (19, 20),  # Little finger
-                       (5, 9), (9, 13), (13, 17)]  
-        
-        colors = [(1, 0.2, 0.2, 0.8), (0.2, 1, 0.2, 0.8), (0.2, 0.2, 1.0, 0.8),
-                   (1, 0.2, 1.0, 0.8), (1, 1.0, 0.2, 0.8), (0.8, 0.8, 0.8 , 0.8)]
-
-        for i in range(len(connections)):
-            connection = connections[i]
-            line_x = [x[connection[0]], x[connection[1]]]
-            line_y = [y[connection[0]], y[connection[1]]]
-            line_z = [z[connection[0]], z[connection[1]]]
-
-            if 0 in connection or i > 19:
-                color = colors[5]
-            else:
-                color = colors[int(np.floor(i/4))]
-            line = gl.GLLinePlotItem(pos=np.column_stack((line_x, line_y, line_z)), color=color, width=10.0)
-            plot.addItem(line)
-        
-        # # Set plot camera parameters
-        # plot.opts['distance'] = 5
-        plot.opts['rotationMethod'] = 'quaternion'
-
-        axes = gl.GLAxisItem()
-        plot.addItem(axes)
-
-        grid = gl.GLGridItem()
-        plot.addItem(grid)
-
-        plot.update_overlay_text("fps_gui", "FPS (GUI): " + str(int(self.fps)), self.fps, plot.height()-60, self.stat_font_size)
-        plot.update_overlay_text("fps_mediapipe", "FPS (Mediapipe): " + str(int(fps_mediapipe)), self.mphands.get_fps(), plot.height()-30, self.stat_font_size)
 
     # Animation loop triggered by QTimer
     def animation_loop(self):
@@ -390,6 +431,13 @@ class MainWindow(QMainWindow):
         recent_imu = self.mobileimu.get_recent_data_imu()
         recent_arm = self.mobileimu.get_recent_data_arm()
         teensybt_recent_eit = self.teensybt.get_recent_data_eit()
+        pose,tran = self.mobileimu.get_recent_predictions()
+        recent_hand = self.unity.get_recent_joint_data()
+        body_pos, body_rot = self.unity.get_recent_body_data()
+        head_pos, head_rot = self.unity.get_recent_head_data()
+        hand_pos, hand_rot = self.unity.get_recent_hand_data()
+        ball_pos, _, _ = self.unity.get_recent_gesture_data()
+        #self.unity.send_data(pose, tran, recent_hand)
         try:
             eit = [dat[1] for dat in teensybt_recent_eit[:100]]
             timestamps = [dat[0] for dat in teensybt_recent_eit[:100]]
@@ -397,6 +445,9 @@ class MainWindow(QMainWindow):
             [self.eit_plots[i].setData(timestamps, [sum(eit_val[0+i:64:8])/8*100 for eit_val in eit]) for i in range(8)]
             self.acc_label.setText(f"Acc: {recent_imu[0]}")
             self.quat_label.setText(f"Quat: {recent_imu[1]}")
+            body_length = len(body_pos)
+            self.body_label.setText(f"Body Length: {body_length}")
+
 
             self.update()
         except Exception as e:
@@ -410,9 +461,11 @@ class MainWindow(QMainWindow):
         # Update plot1
         #add this back in when you get hand position from quest
         #self.update_plot(self.third_row_widget_2, x1, y1, z1, fps_mediapipe) # plot1
+        #self.viewer.update_positions([head_pos, hand_pos, ball_pos])
 
         #plot new arm data
         self.arm_widget.update_plot(recent_arm)
+
 
 
         if self.timestamp_prev == 0:
@@ -426,6 +479,7 @@ class MainWindow(QMainWindow):
             self.fps_total[int(self.i%100)] = fps
             self.fps = sum(self.fps_total[self.fps_total != 0]) / sum(self.fps_total != 0)
             # print(self.fps)
+
 
         self.second_row_widget_1.set_recording_status("Recording Status: " + str(self.recording_status))
         if self.teensybt.DATA_DICT_ENTRY in self.data_dict:

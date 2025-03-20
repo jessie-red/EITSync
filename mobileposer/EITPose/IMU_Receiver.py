@@ -28,22 +28,6 @@ from mobileposer.config import *
 
 
 
-class JointSender:
-    def __init__(self, server_address='127.0.0.1', server_port=5005):
-        """Initialize the socket for sending joint data."""
-        self.server_address = server_address
-        self.server_port = server_port
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    def send_joints(self, rarm_joints):
-        """Send rarm_joints to the visualization script."""
-        message = pickle.dumps(rarm_joints)
-        self.sock.sendto(message, (self.server_address, self.server_port))
-
-    def close_socket(self):
-        """Close the socket."""
-        self.sock.close()
-
 
 class IMUSet:
     """
@@ -159,19 +143,20 @@ class IMUSet:
 class IMUManager:
 
     IMU_DATA_DICT_ENTRY = "imu_data"
-    ARM_DATA_DICT_ENTRY = "arm_data"
-    CALIBRATION_DATA_DICT_ENTRY  = "calibration"
+    POSE_DATA_DICT_ENTRY = "pose_data"
+    CALIBRATION_DATA_DICT_ENTRY  = "calibration_data"
 
-    def __init__(self, data_dict, imu_data_dict_entry = IMU_DATA_DICT_ENTRY, arm_data_dict_entry = ARM_DATA_DICT_ENTRY, calibration_data_dict_entry = CALIBRATION_DATA_DICT_ENTRY,
-    vis = False, use_phone_as_watch = False, use_right_watch = True, combo = 'rw_rp'):
+    def __init__(self, data_dict, imu_data_dict_entry = IMU_DATA_DICT_ENTRY, pose_data_dict_entry = POSE_DATA_DICT_ENTRY, calibration_data_dict_entry = CALIBRATION_DATA_DICT_ENTRY,
+   use_phone_as_watch = False, use_right_watch = True, combo = 'rw_lp'):
         self.collect_data = False
         self.data_dict = data_dict
         self.imu_data_dict_entry = imu_data_dict_entry
-        self.arm_data_dict_entry = arm_data_dict_entry
+        self.pose_data_dict_entry = pose_data_dict_entry
         self.calibration_data_dict_entry = calibration_data_dict_entry
         self.imu_data = (0,0)
-        self.arm_data = np.zeros((5, 3))
-        self.vis = vis     
+        self.arm_data = torch.zeros((5, 3))
+        self.pose = torch.zeros((24,3,3))
+        self.tran = torch.zeros(3)
         self.running = False   
         # Configurations 
         self.use_phone_as_watch = use_phone_as_watch
@@ -207,6 +192,7 @@ class IMUManager:
         oris = quaternion_to_rotation_matrix(oris)
         device2bone = smpl2imu.matmul(oris).transpose(1, 2).matmul(torch.eye(3))
         acc_offsets = smpl2imu.matmul(accs.unsqueeze(-1))   # [num_imus, 3, 1], already in global inertial frame
+        self.data_dict[self.calibration_data_dict_entry] = [(smpl2imu, device2bone)]
 
         # start streaming data
         print('\tFinished Calibrating.\nEstimating poses. Press q to quit')
@@ -215,20 +201,10 @@ class IMUManager:
         # load model
         model = load_model(paths.weights_file)
 
-        # setup Unity server for visualization
-        if self.vis:
-            server_for_unity = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_for_unity.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-            server_for_unity.bind(('0.0.0.0', 8889))
-            server_for_unity.listen(1)
-            print('Server start. Waiting for unity3d to connect.')
-            conn, addr = server_for_unity.accept()
-
         self.running = True
         clock = Clock()
         record_buffer = None
 
-        data_dict[self.calibration_data_dict_entry] = (smpl2imu, device2bone)
 
 
         n_imus = 5
@@ -269,54 +245,40 @@ class IMUManager:
                 ori[:, c] = _ori[:, c]
             
             imu_input = torch.cat([acc.flatten(1), ori.flatten(1)], dim=1)
-            self.imu_data = (acc[:,[1]].flatten(), ori[:,[1]].flatten())
-
-            if self.collect_data:
-                linux_time = time.time()
-                if self.imu_data_dict_entry not in self.data_dict.keys():
-                    self.data_dict[self.imu_data_dict_entry] = [(linux_time, acc[:,[1]], ori[:,[1]], acc_raw, ori_raw)]
-                else:
-                    self.data_dict[self.imu_data_dict_entry].append([(linux_time, acc[:,[1]], ori[:,[1]])])
+            self.acc = acc[:,1,:].squeeze()
+            self.ori = ori[:,1,:,:].squeeze()
+            self.acc_raw = acc_raw
+            self.ori_raw = ori_raw 
+                
 
             # predict pose and translation
             with torch.no_grad():
                 output = model.forward_online(imu_input.squeeze(0), [imu_input.shape[0]])
                 pred_pose = output[0] # [24, 9]
-                pred_joint = output[1] # [24, 3]
+                pred_joint = output[1][-1].reshape(24,3) # [24, 3]
                 pred_tran = output[2] # [3]
 
+            self.pose = rotation_matrix_to_axis_angle(pred_pose.view(1, 216)).view(72)
+            self.tran = pred_tran
+
             # freeze left arm pose
-            for j in self.left_arm:
-                pred_pose[j] = torch.eye(3).view(9)
+            #for j in self.left_arm:
+            #    pred_pose[j] = torch.eye(3).view(9)
 
             # send right arm joints to visualizer
             rarm_joints = pred_joint[self.right_arm].cpu().numpy()  # Extract right arm joint positions
-            ##TODO: add joints to data_dict
             #joint_sender.send_joints(rarm_joints)
+            #print(f"\r {pred_joint.shape}")
             self.arm_data = rarm_joints
             if self.collect_data:
                 linux_time = time.time()
-                if self.arm_data_dict_entry not in self.data_dict.keys():
-                    self.data_dict[self.arm_data_dict_entry] = [(linux_time, rarm_joints)]
-                else:
-                    self.data_dict[self.arm_data_dict_entry].append([(linux_time, rarm_joints)])
+                self.record_data(linux_time)
 
-
-            # send pose
-            if self.vis:
-                s = ','.join(['%g' % v for v in pose]) + '#' + \
-                    ','.join(['%g' % v for v in tran]) + '$'
-                conn.send(s.encode('utf8'))  
-                
-                if os.getenv("DEBUG") is not None:
-                    print('\r', '(recording)' if is_recording else '', 'Sensor FPS:', imu_set.clock.get_fps(),
-                            '\tOutput FPS:', clock.get_fps(), end='')
 
 
         # clean up threads
         get_input_thread.join()
         imu_set.stop_reading()
-        joint_sender.close_socket()
         print('Finish.')
 
     def start_data_collection(self):
@@ -326,7 +288,22 @@ class IMUManager:
         self.collect_data = False
 
     def get_recent_data_imu(self):
-        return self.imu_data
+        return (self.acc, self.ori)
 
     def get_recent_data_arm(self):
         return self.arm_data
+
+    def get_recent_predictions(self):
+        return (self.pose, self.tran)
+
+    def record_data(self, linux_time):
+        if self.pose_data_dict_entry not in self.data_dict.keys():
+            self.data_dict[self.pose_data_dict_entry] = [(linux_time, self.arm_data, self.pose, self.tran)]
+        else:
+            self.data_dict[self.pose_data_dict_entry].append((linux_time, self.arm_data, self.pose, self.tran))
+
+        if self.imu_data_dict_entry not in self.data_dict.keys():
+            self.data_dict[self.imu_data_dict_entry] = [(linux_time, self.acc, self.ori, self.acc_raw, self.ori_raw)]
+        else:
+            self.data_dict[self.imu_data_dict_entry].append((linux_time, self.acc, self.ori, self.acc_raw, self.ori_raw))
+
