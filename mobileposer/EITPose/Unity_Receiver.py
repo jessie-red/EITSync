@@ -149,9 +149,10 @@ class UnityManager:
                 x,y,z,w = map(float, joint.split(','))
                 self.joint_rotations.append((x,y,z,w))
         ball_data = pos.split('#')
-        #print(f"\r{ball_data}")
+        #print(f"\r{ball_data}", end="")
         if len(ball_data) > 1:
-            self.ball_pos = ball_data[0].split(',')
+            self.ball_pos = ball_data[0]
+            #print(f"\r{self.ball_pos}\n", end="")
             self.gesture = ball_data[1]
             self.orientation = ball_data[2]
         body_joints = body.split('#')
@@ -197,7 +198,9 @@ class UnityManager:
             self.data_dict[self.gesture_data_dict_entry] = [(linux_time, self.ball_pos, self.gesture, self.orientation)]
         else:
             self.data_dict[self.gesture_data_dict_entry].append((linux_time, self.ball_pos, self.gesture, self.orientation))
+        """
         if self.body_data_dict_entry not in self.data_dict.keys():
             self.data_dict[self.body_data_dict_entry] = [(linux_time, self.body_pos, self.body_rot)]
         else:
             self.data_dict[self.body_data_dict_entry].append((linux_time, self.body_pos, self.body_rot))
+        """

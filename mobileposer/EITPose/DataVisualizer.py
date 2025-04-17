@@ -16,107 +16,17 @@ import scipy.io
 import numpy as np
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
+from EITPose.EITVisualizer import EITVisualization
 
-class SimplePoints3DViewer(gl.GLViewWidget):
-    """
-    A minimalist 3D point visualization widget that displays three points in 3D space.
-    
-    This class visualizes three 3D points, each with a different color.
-    It can be updated with new position data and integrated into existing PyQt applications.
-    """
-    
-    def __init__(self, parent=None, point_size=10, grid_size=20):
-        """
-        Initialize the 3D points viewer.
-        
-        Args:
-            parent: Parent widget
-            point_size: Size of the points
-            grid_size: Size of the grid
-        """
-        super().__init__(parent)
-        
-        self.point_size = point_size
-        
-        # Initialize the viewer
-        self._setup_viewer(grid_size)
-        
-        # Create scatter items for current positions
-        self.scatter_items = [
-            gl.GLScatterPlotItem(pos=np.array([[0, 0, 0]]), color=color, size=self.point_size)
-            for color in [(1, 0, 0, 1), (0, 1, 0, 1), (0, 0, 1, 1)]  # Red, Green, Blue
-        ]
-        
-        # Add scatter items to the view
-        for scatter in self.scatter_items:
-            self.addItem(scatter)
-    
-    def _setup_viewer(self, grid_size):
-        """Set up the 3D viewer with grid and axes."""
-        # Add coordinate grid
-        grid = gl.GLGridItem()
-        grid.setSize(grid_size, grid_size, grid_size)
-        grid.setSpacing(1, 1, 1)
-        self.addItem(grid)
-        
-        # Add coordinate axes
-        axis_x = gl.GLLinePlotItem(pos=np.array([[0, 0, 0], [10, 0, 0]]), color=(1, 0, 0, 1), width=2)
-        axis_y = gl.GLLinePlotItem(pos=np.array([[0, 0, 0], [0, 10, 0]]), color=(0, 1, 0, 1), width=2)
-        axis_z = gl.GLLinePlotItem(pos=np.array([[0, 0, 0], [0, 0, 10]]), color=(0, 0, 1, 1), width=2)
-        self.addItem(axis_x)
-        self.addItem(axis_y)
-        self.addItem(axis_z)
-    
-    def update_positions(self, positions):
-        """
-        Update the visualization with new positions.
-        
-        Args:
-            positions: List of three numpy arrays, each containing a 3D position.
-                      Each array should be shape (3,) or (1, 3) representing x, y, z coordinates.
-        """
-        if len(positions) != 3:
-            raise ValueError(f"Expected 3 position arrays, got {len(positions)}")
-        
-        for i, pos_array in enumerate(positions):
-            # Ensure the position array is the right shape
-            if len(pos_array.shape) == 1:
-                # If it's a single 1D array with 3 elements, reshape it to (1, 3)
-                if pos_array.shape[0] == 3:
-                    pos_array = pos_array.reshape(1, 3)
-                else:
-                    raise ValueError(f"Position array {i} has invalid shape: {pos_array.shape}")
-            else:
-                # If it's already 2D, ensure it's (1, 3)
-                if pos_array.shape != (1, 3):
-                    raise ValueError(f"Position array {i} must have shape (1, 3), got {pos_array.shape}")
-            
-            # Update current position
-            self.scatter_items[i].setData(pos=pos_array)
-    
-    def set_point_size(self, size):
-        """Set the size of the points."""
-        self.point_size = size
-        for scatter in self.scatter_items:
-            scatter.setData(size=size)
-    
-    def set_point_colors(self, colors):
-        """
-        Set custom colors for the three points.
-        
-        Args:
-            colors: List of three colors, each as an RGBA tuple (r, g, b, a) with values 0-1
-        """
-        if len(colors) != 3:
-            raise ValueError(f"Expected 3 colors, got {len(colors)}")
-            
-        for i, color in enumerate(colors):
-            self.scatter_items[i].setData(color=color)
+
+
+
+
 
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, unity=False):
         super().__init__()
 
         self.gesture_dictionary = {
@@ -161,6 +71,9 @@ class MainWindow(QMainWindow):
             'wrist5': "left",
         }
 
+        self.unity = unity
+        self.pred = True
+
 
        
         self.eit_plot = pg.PlotWidget()
@@ -184,6 +97,18 @@ class MainWindow(QMainWindow):
         self.timeline.setMaximum(4999)  # End of your range (5000 points)
         self.timeline.valueChanged.connect(self.timeline_value_changed)
 
+        self.eit_view = EITVisualization()
+        self.eit_view.sizeHint = lambda: pg.QtCore.QSize(800, 400)
+
+        self.label_layout = QVBoxLayout()
+        self.gesture_label = QLabel(f"Gesture: ")
+        self.orientation_label = QLabel(f"Orientation: ")
+        self.ball_label = QLabel(f"Ball: ")
+        self.label_layout.addWidget(self.gesture_label)
+        self.label_layout.addWidget(self.orientation_label)
+        self.label_layout.addWidget(self.ball_label)
+
+
         control_buttons = QHBoxLayout()
         self.load_button = QPushButton('Load File')
         self.load_button.clicked.connect(self.open_file_dialog)
@@ -196,16 +121,18 @@ class MainWindow(QMainWindow):
         self.annotation_enabled = False
         self.playing = False
 
-        self.viewer = SimplePoints3DViewer()
-        self.viewer.setMinimumSize(400,300)
-
 
 
         # Layout setup
         layout = QVBoxLayout()
+        plotsLayout = QHBoxLayout()
+        #plotsLayout.addWidget(self.viewer)
+        plotsLayout.addLayout(self.label_layout)
+        plotsLayout.addWidget(self.eit_view)
         central_widget = QWidget()
         central_widget.setLayout(layout)
-        layout.addWidget(self.viewer)
+        layout.addLayout(plotsLayout)
+        
         layout.addWidget(self.acc_plot)
         #layout.addLayout(graph_layout)
         layout.addWidget(self.eit_plot)
@@ -248,13 +175,16 @@ class MainWindow(QMainWindow):
     def load_handpose_data(self, file_name):
         # Add code here to load the handpose data
         data = pd.read_pickle(file_name)
+        data = data[10:]
+        #print(data.dtypes)
+        
 
         if 'acc' in data.columns:
-            self.acc = np.stack(data['acc'].to_numpy())
+            self.acc = np.vstack([tensor.numpy() for tensor in data['acc']])
         else:
             self.acc = None
         if 'ori' in data.columns:
-            self.ori = np.stack(data['ori'].to_numpy())
+            self.ori = data['ori'].to_numpy()
         else:
             self.ori = None
         if 'head_pos' in data.columns:
@@ -272,7 +202,23 @@ class MainWindow(QMainWindow):
         if 'hand_rot' in data.columns:
             self.hand_rot = np.stack(data['hand_rot'].to_numpy())
         else:
-            self.hand_rpt = None
+            self.hand_rot = None
+        if 'hand_pos_pred' in data.columns:
+            self.hand_pos_pred = np.stack(data['hand_pos_pred'].to_numpy())
+        else:
+            self.hand_pos_pred = None
+        if 'hand_rot_pred' in data.columns:
+            self.hand_rot_pred = np.stack(data['hand_rot_pred'].to_numpy())
+        else:
+            self.hand_rot_pred = None
+        if 'joint_data' in data.columns:
+            self.joint_data = data['joint_data'].to_numpy()
+        else:
+            self.joint_data = None
+        if 'joint_data_pred' in data.columns:
+            self.joint_data_pred = np.stack(data['joint_data_pred'].tolist())
+        else:
+            self.joint_data_pred = None
         if 'ball_pos' in data.columns:
             self.ball_pos = np.stack(data['ball_pos'].to_numpy())
         else:
@@ -281,24 +227,29 @@ class MainWindow(QMainWindow):
             self.gesture_actual = data['gesture'].to_numpy()
         else:
             self.gesture_actual = None
+        if 'orientation' in data.columns:
+            self.orientation = data['orientation'].to_numpy()
+        else:
+            self.orientation = None
         if 'eit_data' in data.columns:
             self.eit_data = np.stack(data['eit_data'].tolist())
         elif 'data' in data.columns:
             self.eit_data = np.stack(data['data'].tolist())
 
         #print(self.eit_data.shape)
-        #print(self.gesture_actual.shape)
-        #print(self.head_pos.shape)
-        #print(self.hand_pos.shape)
-        #print(self.acc[1].shape)
-        #print(self.ori[1].shape)
+        #print(self.joint_data_pred.shape)
+        #print(self.joint_data_pred[0].shape)
+
 
         self.eit_data = self.eit_data - np.mean(self.eit_data, axis=0)
+        self.eit_view.calc_perms(self.eit_data)
         self.timestamps = np.array([i for i in range(len(self.eit_data))])
         self.timeline.setMaximum(len(self.timestamps)-1)
 
+
         for i in range(8):
             self.eit_plots[i].setData(self.timestamps[0:100], self.eit_data[0:100, 40+i])
+        self.eit_view.plot_tripcolor(0)
 
 
     def play_button_clicked(self, pressed):
@@ -324,12 +275,23 @@ class MainWindow(QMainWindow):
     def timeline_value_changed(self, value):
         self.index_value = value
 
-        self.viewer.update_positions([self.head_pos[value,:], self.hand_pos[value,:], self.ball_pos[value,:]])
+        #self.viewer.update_positions([self.head_pos[value,:], self.hand_pos[value,:], self.ball_pos[value,:]])
 
         for i in range(8):
             self.eit_plots[i].setData(self.timestamps[value:min(100+value, len(self.timestamps)-1)], self.eit_data[value:min(100+value, len(self.timestamps)-1), 40+i])
         for i in range(self.acc.shape[1]):
             self.acc_plots[i].setData(self.timestamps[value:min(100+value, len(self.timestamps)-1)], self.acc[value:min(100+value, len(self.timestamps)-1), i])
+        self.eit_view.plot_tripcolor(value)
+        self.gesture_label.setText(f"Gesture: {self.gesture_actual[value]}")
+        self.orientation_label.setText(f"Orientation: {self.orientation[value]}")
+        self.ball_label.setText(f"Ball: {self.ball_pos[value]}")
+        if self.unity:
+            if self.pred:
+                self.unity.send_data(self.head_pos[value], self.head_rot[value], self.hand_pos[value], self.hand_rot[value],
+                self.hand_pos_pred[value], self.hand_rot_pred[value], self.joint_data[value], self.joint_data_pred[value])
+            else:
+                self.unity.send_data(self.head_pos[value], self.head_rot[value], self.hand_pos[value], self.hand_rot[value],
+                self.hand_pos[value], self.hand_rot[value], self.joint_data[value], self.joint_data[value])
 
 
 
@@ -361,92 +323,6 @@ class MainWindow(QMainWindow):
             if self.annotation_enabled and self.gesture_group.checkedId() != 18 and self.timestamps[self.index_value] - self.start_timestamp > 1.5:
                 self.none_button.setChecked(True)
                 self.play_button_clicked(False)
-    def is_point_inside_polygon(self, point, polygon):
-        """
-        Determine if a point lies inside a polygon using the ray casting algorithm.
-        
-        Parameters:
-        point: tuple of (x, y) coordinates for the test point
-        polygon: list of tuples, each containing (x, y) coordinates for polygon vertices
-        
-        Returns:
-        bool: True if point is inside the polygon, False otherwise
-        """
-        x, y = point
-        n = len(polygon)
-        inside = False
-        
-        # Get the first point of the polygon
-        p1x, p1y = polygon[0]
-        
-        # Iterate through each edge of the polygon
-        for i in range(polygon.shape[0]):
-            # Get the next point (wrap around to first point if at end)
-            p2x, p2y = polygon[i,:]
-            
-            # Check if point is above the minimum y coordinate of line segment
-            if y > min(p1y, p2y):
-                # Check if point is below the maximum y coordinate of line segment
-                if y <= max(p1y, p2y):
-                    # Check if point is to the left of maximum x coordinate of line segment
-                    if x <= max(p1x, p2x):
-                        # Calculate intersection point
-                        if p1y != p2y:
-                            xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                        
-                        # If either the point is to the left of the line segment or
-                        # the point is directly on the line segment
-                        if p1x == p2x or x <= xinters:
-                            inside = not inside
-            
-            # Move to the next point
-            p1x, p1y = p2x, p2y
-        
-        return inside
-    def running_average(self, x, window_size):
-        """
-        Calculate the running average of a numpy array along the first dimension.
-        
-        Parameters:
-        -----------
-        x : array_like
-            Input array (1D or 2D)
-        window_size : int
-            Size of the moving window
-            
-        Returns:
-        --------
-        numpy.ndarray
-            Array of running averages with same number of dimensions as input
-        """
-        # Convert input to numpy array if it isn't already
-        x = np.asarray(x)
-        
-        # Handle both 1D and 2D arrays
-        if x.ndim == 1:
-            x = x.reshape(-1, 1)
-        elif x.ndim > 2:
-            raise ValueError("Input array must be 1D or 2D")
-        
-        # Create a padded array to handle edge cases
-        pad_width = ((window_size - 1, 0), (0, 0))
-        x_padded = np.pad(x, pad_width, mode='edge')
-        
-        # Create a 3D array of sliding windows
-        shape = (x.shape[0], window_size, x.shape[1])
-        strides = (x.itemsize * x.shape[1],  # stride along first dim
-                x.itemsize * x.shape[1],   # stride for window
-                x.itemsize)                # stride along second dim
-        windows = np.lib.stride_tricks.as_strided(x_padded, shape=shape, strides=strides)
-        
-        # Calculate the average for each window
-        result = np.mean(windows, axis=1)
-        
-        # Return 1D array if input was 1D
-        if x.shape[1] == 1:
-            return result.ravel()
-        return result
-
 
     def keyPressEvent(self, event):
         # Override keyPressEvent to respond to the space bar

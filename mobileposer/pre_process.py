@@ -99,6 +99,42 @@ def get_eit_avg_vals(eit_data):
 def remove_eit_zeros(eit_data):
     return np.array([eit_dat for eit_dat in eit_data if eit_dat != 0.0])
 
+def get_fov_from_pos(pos):
+    if abs(pos[2]) < .3:
+        return 0
+    else:
+        return 1
+
+def get_fov_from_pos_AR(pos):
+    if abs(pos[0]) == .2 and abs(pos[1]) == 0:
+        return 0
+    else:
+        return 1
+
+
+def process_ball_VR(pos):
+    if type(pos) == list:
+        return get_fov_from_pos(pos)
+    else:
+        if pos < 10:
+            return 1
+        else:
+            return 0
+
+def process_ball_AR(pos):
+    if type(pos) == list:
+        return get_fov_from_pos(pos)
+    else:
+        if pos < 4:
+            return 1
+        else:
+            return 0
+def process_ball(pos):
+    if type(pos) == list:
+        return [float(item) for item in pos]
+    else:
+        return float(pos)
+
 username = input("Please enter username: (the most recent dataset with that name will be processed)")
 #username = "test"
 latest_files = get_latest_files_for_user(username)
@@ -116,7 +152,9 @@ for filename in latest_files:
         eit_df['eit_data'] = eit_df['eit_data'].apply(lambda x: np.hstack((remove_eit_zeros(x), get_eit_avg_vals(x))))
     elif "gesture" in file:
         gesture_df = pd.read_pickle(filename)
-        gesture_df['ball_pos'] = gesture_df['ball_pos'].apply(lambda x: [float(item) for item in x])
+        gesture_df['ball_pos'] = gesture_df['ball_pos'].apply(process_ball)
+        gesture_df['VR_FOV'] = gesture_df['ball_pos'].apply(process_ball_VR)
+        gesture_df['AR_FOV'] = gesture_df['ball_pos'].apply(process_ball_AR)
     elif "hand" in file:
         hand_df = pd.read_pickle(filename)
         hand_df['hand_pos'] = hand_df['hand_pos'].apply(lambda x: [float(item) for item in x])
@@ -134,13 +172,23 @@ for filename in latest_files:
     elif "pose" in file:
         pose_df = pd.read_pickle(filename)
 
-
+missing_body = True
 for idx, file  in enumerate([body_df, eit_df, gesture_df, hand_df, head_df, imu_df, pose_df]):
     if len(file) == 0:
-        print(f"Missing file, idx {idx}")
+        if idx == 0:
+            missing_body = True
+        else:
+            print(f"Missing file, idx {idx}")
+
 #okay now we have to process them into a single dataframe
-processed_df = efficient_merge_by_timestamp(imu_df, [body_df, eit_df, gesture_df, hand_df, head_df, pose_df])
+if missing_body:
+    processed_df = efficient_merge_by_timestamp(imu_df, [eit_df, gesture_df, hand_df, head_df, pose_df])
+else:
+    processed_df = efficient_merge_by_timestamp(imu_df, [body_df, eit_df, gesture_df, hand_df, head_df, pose_df])
 #print(processed_df.columns)
+df = processed_df
+filtered_df = df[~df['acc'].apply(lambda x: all(val == 0 for val in x))]
+processed_df = filtered_df
 processed_df.to_pickle(paths.processed_data / f"{username}.pkl")
 processed_df.to_csv(paths.processed_data / f"{username}.csv")
 
