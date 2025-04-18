@@ -236,6 +236,9 @@ class MainWindow(QMainWindow):
         elif 'data' in data.columns:
             self.eit_data = np.stack(data['data'].tolist())
 
+        if self.joint_data_pred == None:
+            self.pred = False
+
         #print(self.eit_data.shape)
         #print(self.joint_data_pred.shape)
         #print(self.joint_data_pred[0].shape)
