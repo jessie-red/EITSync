@@ -175,6 +175,22 @@ class MainWindow(QMainWindow):
     def load_handpose_data(self, file_name):
         # Add code here to load the handpose data
         data = pd.read_pickle(file_name)
+        if isinstance(data, dict):
+            if 'ground_truth_rot' in data:
+                #print(data['ground_truth_rot'].shape)
+                self.joint_data = data['ground_truth_rot'].reshape(-1, 19,4)
+            else:
+                raise ValueError("Expected 'ground_truth_rot' in the dictionary")
+            if 'pred_rot' in data:
+                #print(data['ground_truth_rot'].shape)
+                self.joint_data_pred = data['pred_rot'].reshape(-1, 19,4)
+            else:
+                raise ValueError("Expected 'pred_rot' in the dictionary")
+            self.eit_data = None
+            self.timestamps = np.array([i for i in range(len(self.joint_data))])
+            self.timeline.setMaximum(len(self.timestamps)-1)
+            return
+
         data = data[10:]
         #print(data.dtypes)
         
@@ -236,12 +252,12 @@ class MainWindow(QMainWindow):
         elif 'data' in data.columns:
             self.eit_data = np.stack(data['data'].tolist())
 
-        if self.joint_data_pred == None:
+        if self.joint_data_pred is None:
             self.pred = False
 
         #print(self.eit_data.shape)
-        #print(self.joint_data_pred.shape)
-        #print(self.joint_data_pred[0].shape)
+        print(self.joint_data_pred.shape)
+        print(self.joint_data_pred[0].shape)
 
 
         self.eit_data = self.eit_data - np.mean(self.eit_data, axis=0)
@@ -279,6 +295,13 @@ class MainWindow(QMainWindow):
         self.index_value = value
 
         #self.viewer.update_positions([self.head_pos[value,:], self.hand_pos[value,:], self.ball_pos[value,:]])
+
+        if self.eit_data is None:
+            dummy_rot = np.array([0,0,0,0])
+            self.unity.send_data(np.array([0,1.16,0]), dummy_rot, np.array([0,.8,0]), dummy_rot,
+                np.array([-.2,.8,0]), dummy_rot, self.joint_data[value], self.joint_data_pred[value])
+            return
+
 
         for i in range(8):
             self.eit_plots[i].setData(self.timestamps[value:min(100+value, len(self.timestamps)-1)], self.eit_data[value:min(100+value, len(self.timestamps)-1), 40+i])
