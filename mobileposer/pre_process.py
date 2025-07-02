@@ -5,6 +5,83 @@ import glob
 import os
 from datetime import datetime
 import numpy as np
+from threading import Condition, Thread, Event
+import socket
+import time
+from threading import Condition, Thread, Event
+import socket
+import time
+
+class UnityManager:
+    
+    def __init__(self, joint_list, length, endevent):
+        self.joint_list = joint_list
+        self.running = True
+        self.endevent = endevent
+        self.length = length
+
+        
+
+
+
+    def run(self, unityconnected): 
+        server_for_unity = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_for_unity.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        server_for_unity.bind(('0.0.0.0', 8889))
+        server_for_unity.listen(1)
+        print('Server start. Waiting for unity3d to connect.')
+        self.conn, addr = server_for_unity.accept()
+        print('Unity server accepted')
+        unityconnected.set()
+        buffer = ""
+        while self.running and self.conn:
+            try:
+                data = self.conn.recv(4096).decode('utf-8')
+                if not data:
+                    print("Client disconnected")
+                    self.running = False
+                    break
+                    
+                # Add to buffer
+                buffer += data
+                
+                # Process complete messages
+                while '$' in buffer:
+                    # Extract message until newline
+                    #print(f"\rrecd\n", end="")
+                    message, buffer = buffer.split('$', 1)
+                    
+                    self.parse_message(message)
+
+            except Exception as e:
+                print(f"Error with data: {e}")
+                break
+                
+
+
+    def send_data(self, joint_data):
+        joint_strings = [f"{q[0]}, {q[1]},{q[2]},{q[3]}" for q in joint_data]
+        joint_strings.insert(0, f"0, 0, 0")
+        joint_strings.insert(1, f"0, 0, 0, 0")
+        s = '#'.join(joint_strings) + '$'
+        self.conn.send(s.encode('utf8'))
+
+    def parse_message(self, data):
+        joint_lst = []
+        joints = data.split('#')
+        for joint in joints:
+            if joint != '':
+                #print(joint)
+                x,y,z = map(float, joint.split(','))
+                joint_lst.append((x,y,z))
+        self.joint_list.append(joint_lst)
+        if len(self.joint_list) == self.length-1:
+            endevent.set()
+        else:
+            length = len(self.joint_list)
+            print(f"\rrecieved {length}", end="")
+
+
 
 def get_latest_files_for_user(username):
     # Find all files matching the pattern
@@ -143,11 +220,7 @@ body_df, eit_df, gesture_df, hand_df, head_df, imu_df, pose_df = [[] for _ in ra
 for filename in latest_files:
     file = filename.split("/")[-1].split("_")[1]
     #print(file)
-    if "body" in file:
-        body_df = pd.read_pickle(filename)
-        body_df['body_pos'] = body_df['body_pos'].apply(lambda x: [[float(item) for item in sublist] for sublist in x])
-        body_df['body_rot'] = body_df['body_rot'].apply(lambda x: [[float(item) for item in sublist] for sublist in x])
-    elif "eit" in file:
+    if "eit" in file:
         eit_df = pd.read_pickle(filename)
         eit_df['eit_data'] = eit_df['eit_data'].apply(lambda x: np.hstack((remove_eit_zeros(x), get_eit_avg_vals(x))))
     elif "gesture" in file:
@@ -173,7 +246,7 @@ for filename in latest_files:
         pose_df = pd.read_pickle(filename)
 
 missing_body = True
-for idx, file  in enumerate([body_df, eit_df, gesture_df, hand_df, head_df, imu_df, pose_df]):
+for idx, file  in enumerate([eit_df, gesture_df, hand_df, head_df, imu_df, pose_df]):
     if len(file) == 0:
         if idx == 0:
             missing_body = True
@@ -187,9 +260,52 @@ else:
     processed_df = efficient_merge_by_timestamp(imu_df, [body_df, eit_df, gesture_df, hand_df, head_df, pose_df])
 #print(processed_df.columns)
 df = processed_df
-filtered_df = df[~df['acc'].apply(lambda x: all(val == 0 for val in x))]
+def remove_duplicates(df, name):
+    prev = None
+    group_ids = []
+    group_id = -1
+
+    for val in df[name]:
+        if prev is None or not np.array_equal(val, prev):
+            group_id += 1
+        group_ids.append(group_id)
+        prev = val
+
+    df['group'] = group_ids
+    df['within_group_idx'] = df.groupby('group').cumcount()
+
+    # Keep only the first 5 repetitions
+    return df[df['within_group_idx'] < 5].drop(columns=['group', 'within_group_idx'])
+
+
+# Track group changes
+filtered_df = remove_duplicates(df, 'eit_data')
+filtered_df = remove_duplicates(filtered_df, 'acc')
+filtered_df = filtered_df[~filtered_df['acc'].apply(lambda x: all(val == 0 for val in x))]
+
 processed_df = filtered_df
 processed_df.to_pickle(paths.processed_data / f"{username}.pkl")
 processed_df.to_csv(paths.processed_data / f"{username}.csv")
+
+df = processed_df
+df = df[~df['acc'].apply(lambda x: all(val == 0 for val in x))]
+joint_list = []
+unityconnected = Event()
+endevent = Event()
+unity = UnityManager(joint_list, df.shape[0], endevent)
+unity_thread = Thread(target=unity.run, daemon=True, args = (unityconnected,))
+unity_thread.start()
+unityconnected.wait()
+for iter, row in enumerate(df.itertuples()):
+    #print(f"\rsending {iter}\n", end = "")
+    unity.send_data(row.joint_data)
+endevent.wait()
+#time.sleep(2)
+#print(joint_list[-1])
+df.drop(df.index[-1], inplace=True)
+df['joint_pos'] = joint_list
+print("\nwriting")
+df.to_pickle(paths.processed_data / f"{username}_pos.pkl")
+df.to_csv(paths.processed_data / f"{username}_pos.csv")
 
 

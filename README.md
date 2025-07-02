@@ -18,12 +18,29 @@ You will then need to install the local mobileposer package for development via 
 ```
 pip install -e .
 ```
+For any further missing packages, simply run 
+```
+conda install [package name]
+```
 # Running Files
 
 To run files, run them from the EITSync directory like
 ```
 python mobileposer/[nameoffile].py
 ```
+
+# Data Visualizer
+The data visualizer works for visualizing ground truth data as well as predicted data.
+The necessary unity project for data visualization can be found [here](https://drive.google.com/file/d/1Zx1mU-K7MQH0bvkGrm7nF_CYnFeveQAO/view?usp=sharing)
+To run the data visualizer, type in the terminal:
+```
+python mobileposer/data_visualizer.py
+```
+
+When the terminal says: "Server start. Waiting for unity3d to connect." Click play on the 
+"Figure_hand"
+scene. Now, click the "Load File" button to load the **ground truth** file that you are trying to visualize. If you are trying to visualize a prediction, you still need to load this ground truth. If you are not trying to visualize a prediction, you can simply click into the "scene" tab in Unity so you can navigate the camera, and the blue hand should display the ground truth of the data that you loaded. The red hand displays the prediction, so if you are not trying to visualize a prediction then you can ignore the red hand. If you are trying to visualize a prediction, click the "Load Predictions" button and the red hand should display the predicted hand pose. Right now, predicted hand position has not been implemented. 
+
 
 
 # Important Files

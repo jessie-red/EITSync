@@ -104,18 +104,23 @@ class MainWindow(QMainWindow):
         self.gesture_label = QLabel(f"Gesture: ")
         self.orientation_label = QLabel(f"Orientation: ")
         self.ball_label = QLabel(f"Ball: ")
+        self.FOV_label = QLabel(f"FOV: ")
         self.label_layout.addWidget(self.gesture_label)
         self.label_layout.addWidget(self.orientation_label)
         self.label_layout.addWidget(self.ball_label)
+        self.label_layout.addWidget(self.FOV_label)
 
 
         control_buttons = QHBoxLayout()
         self.load_button = QPushButton('Load File')
         self.load_button.clicked.connect(self.open_file_dialog)
+        self.load_predict_button = QPushButton('Load Predictions')
+        self.load_predict_button.clicked.connect(self.open_predict_dialog)
         self.play_button = QPushButton('Play', checkable=True)
         self.play_button.clicked.connect(self.play_button_clicked)
 
         control_buttons.addWidget(self.load_button)
+        control_buttons.addWidget(self.load_predict_button)
         control_buttons.addWidget(self.play_button)
 
         self.annotation_enabled = False
@@ -146,6 +151,9 @@ class MainWindow(QMainWindow):
         self.original_hand_data = None
         self.prelabeled_gestures = None
         self.index_value = 0
+        self.timestamps = None
+        self.eit_data = None
+        self.FOV = None
 
         # Set the central widget and show the GUI
         self.setCentralWidget(central_widget)
@@ -159,7 +167,18 @@ class MainWindow(QMainWindow):
 
 
         
+    def open_predict_dialog(self):
+        options = QFileDialog.Options()
+        # Uncomment the following line if you want a native file dialog.
+        # options |= QFileDialog.DontUseNativeDialog
+        file_name, _ = QFileDialog.getOpenFileName(self, "QFileDialog.getOpenFileName()", "",
+                                                   "All Files (*);;PKL Files (*.pkl)", options=options)
+        if file_name:
+            # Add code here to handle the file loading
+            self.load_prediction_data(file_name)
+            self.load_predict_button.setText("Prediction: " + file_name.split('/')[-1])
 
+    
     def open_file_dialog(self):
         # This method will be called when the 'Load file' button is clicked
         options = QFileDialog.Options()
@@ -175,28 +194,14 @@ class MainWindow(QMainWindow):
     def load_handpose_data(self, file_name):
         # Add code here to load the handpose data
         data = pd.read_pickle(file_name)
-        if isinstance(data, dict):
-            if 'ground_truth_rot' in data:
-                #print(data['ground_truth_rot'].shape)
-                self.joint_data = data['ground_truth_rot'].reshape(-1, 19,4)
-            else:
-                raise ValueError("Expected 'ground_truth_rot' in the dictionary")
-            if 'pred_rot' in data:
-                #print(data['ground_truth_rot'].shape)
-                self.joint_data_pred = data['pred_rot'].reshape(-1, 19,4)
-            else:
-                raise ValueError("Expected 'pred_rot' in the dictionary")
-            self.eit_data = None
-            self.timestamps = np.array([i for i in range(len(self.joint_data))])
-            self.timeline.setMaximum(len(self.timestamps)-1)
-            return
+        
 
         data = data[10:]
         #print(data.dtypes)
         
-
+        
         if 'acc' in data.columns:
-            self.acc = np.vstack([tensor.numpy() for tensor in data['acc']])
+            self.acc = np.vstack([np.array(tensor) for tensor in data['acc']])
         else:
             self.acc = None
         if 'ori' in data.columns:
@@ -251,13 +256,16 @@ class MainWindow(QMainWindow):
             self.eit_data = np.stack(data['eit_data'].tolist())
         elif 'data' in data.columns:
             self.eit_data = np.stack(data['data'].tolist())
+        if 'VR_FOV' in data:
+            #print(data['ground_truth_rot'].shape)
+            self.FOV = data['VR_FOV']
+        else:
+            self.FOV = None
 
-        if self.joint_data_pred is None:
-            self.pred = False
 
         #print(self.eit_data.shape)
-        print(self.joint_data_pred.shape)
-        print(self.joint_data_pred[0].shape)
+        #print(self.joint_data_pred.shape)
+        #print(self.joint_data_pred[0].shape)
 
 
         self.eit_data = self.eit_data - np.mean(self.eit_data, axis=0)
@@ -269,6 +277,25 @@ class MainWindow(QMainWindow):
         for i in range(8):
             self.eit_plots[i].setData(self.timestamps[0:100], self.eit_data[0:100, 40+i])
         self.eit_view.plot_tripcolor(0)
+
+    def load_prediction_data(self, file_name):
+        data = pd.read_pickle(file_name)
+        if 'ground_truth_rot' in data:
+            #print(data['ground_truth_rot'].shape)
+            self.joint_data = data['ground_truth_rot'].reshape(-1, 19,4)
+        else:
+            raise ValueError("Expected 'ground_truth_rot' in the dictionary")
+        if 'pred_rot' in data:
+            #print(data['ground_truth_rot'].shape)
+            self.joint_data_pred = data['pred_rot'].reshape(-1, 19,4)
+        else:
+            raise ValueError("Expected 'pred_rot' in the dictionary")
+        
+        if self.timestamps is None:
+            self.timestamps = np.array([i for i in range(len(self.joint_data))])
+            self.timeline.setMaximum(len(self.timestamps)-1)
+        return
+        
 
 
     def play_button_clicked(self, pressed):
@@ -296,28 +323,27 @@ class MainWindow(QMainWindow):
 
         #self.viewer.update_positions([self.head_pos[value,:], self.hand_pos[value,:], self.ball_pos[value,:]])
 
-        if self.eit_data is None:
-            dummy_rot = np.array([0,0,0,0])
-            self.unity.send_data(np.array([0,1.16,0]), dummy_rot, np.array([0,.8,0]), dummy_rot,
-                np.array([-.2,.8,0]), dummy_rot, self.joint_data[value], self.joint_data_pred[value])
-            return
+        
 
-
-        for i in range(8):
-            self.eit_plots[i].setData(self.timestamps[value:min(100+value, len(self.timestamps)-1)], self.eit_data[value:min(100+value, len(self.timestamps)-1), 40+i])
-        for i in range(self.acc.shape[1]):
-            self.acc_plots[i].setData(self.timestamps[value:min(100+value, len(self.timestamps)-1)], self.acc[value:min(100+value, len(self.timestamps)-1), i])
-        self.eit_view.plot_tripcolor(value)
-        self.gesture_label.setText(f"Gesture: {self.gesture_actual[value]}")
-        self.orientation_label.setText(f"Orientation: {self.orientation[value]}")
-        self.ball_label.setText(f"Ball: {self.ball_pos[value]}")
+        if self.eit_data is not None:
+            for i in range(8):
+                self.eit_plots[i].setData(self.timestamps[value:min(100+value, len(self.timestamps)-1)], self.eit_data[value:min(100+value, len(self.timestamps)-1), 40+i])
+            for i in range(self.acc.shape[1]):
+                self.acc_plots[i].setData(self.timestamps[value:min(100+value, len(self.timestamps)-1)], self.acc[value:min(100+value, len(self.timestamps)-1), i])
+            self.eit_view.plot_tripcolor(value)
+            self.gesture_label.setText(f"Gesture: {self.gesture_actual[value]}")
+            self.orientation_label.setText(f"Orientation: {self.orientation[value]}")
+            self.ball_label.setText(f"Ball: {self.ball_pos[value]}")
+        #if self.FOV is not None:
+                #self.FOV_label.setText(f"FOV: {self.FOV[value]}")
         if self.unity:
-            if self.pred:
-                self.unity.send_data(self.head_pos[value], self.head_rot[value], self.hand_pos[value], self.hand_rot[value],
-                self.hand_pos_pred[value], self.hand_rot_pred[value], self.joint_data[value], self.joint_data_pred[value])
+            if self.joint_data_pred is not None:
+                dummy_rot = np.array([0,0,0,0])
+                self.unity.send_data(np.array([0,1.16,0]), dummy_rot, np.array([.1,0,0]), dummy_rot,
+                np.array([-.2,0,0]), dummy_rot, self.joint_data[value], self.joint_data_pred[value])
             else:
                 self.unity.send_data(self.head_pos[value], self.head_rot[value], self.hand_pos[value], self.hand_rot[value],
-                self.hand_pos[value], self.hand_rot[value], self.joint_data[value], self.joint_data[value])
+                np.zeros(3), self.hand_rot[value], self.joint_data[value], self.joint_data[value])
 
 
 

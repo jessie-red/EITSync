@@ -151,6 +151,7 @@ class InfoWidget(QWidget):
         self.bt_fps = QLabel()
         self.mp_fps = QLabel()
         self.gui_fps = QLabel()
+        self.ball_pos = QLabel()
 
         # Add the QLabel to the QVBoxLayout
         self.layout.addWidget(self.recording_status)
@@ -158,6 +159,7 @@ class InfoWidget(QWidget):
         self.layout.addWidget(self.eit_data_length)
         self.layout.addWidget(self.imu_data_length)
         self.layout.addWidget(self.mp_data_length)
+        self.layout.addWidget(self.ball_pos)
         self.layout.addWidget(self.bt_connected_status)
         self.layout.addWidget(self.bt_fps)
         self.layout.addWidget(self.mp_fps)
@@ -185,6 +187,9 @@ class InfoWidget(QWidget):
     def set_mp_data_length(self, text):
         # Update the text of the QLabel
         self.mp_data_length.setText(text)
+    
+    def set_ball_pos(self,text):
+        self.ball_pos.setText(text)
 
     def set_bt_connected_status(self, text):
         # Update the text of the QLabel
@@ -304,7 +309,8 @@ class MainWindow(QMainWindow):
         self.second_row_widget_1.set_bt_data_length("Teensy Data Length: 0")
         self.second_row_widget_1.set_eit_data_length("EIT Data Length: 0")
         self.second_row_widget_1.set_imu_data_length("IMU Data Length: 0")
-        self.second_row_widget_1.set_mp_data_length("MP Hands Data Length: 0")
+        self.second_row_widget_1.set_mp_data_length("Hands Data Length: 0")
+        self.second_row_widget_1.set_ball_pos("Ball Position: N/A")
         self.second_row_widget_1.set_bt_connected_status("Bluetooth Status: False")
         self.second_row_widget_1.set_bt_fps("Bluetooth FPS: 0")
         self.second_row_widget_1.set_mp_fps("Mediapipe FPS: 0")
@@ -494,13 +500,13 @@ class MainWindow(QMainWindow):
             self.second_row_widget_1.set_imu_data_length("IMU Data Length: " + str(len(self.data_dict[self.mobileimu.IMU_DATA_DICT_ENTRY])))
         else:
             self.second_row_widget_1.set_imu_data_length("IMU Data Length: " + str(0))
-        """ update this too
-        if self.mphands.DATA_DICT_ENTRY in self.data_dict:
-            self.second_row_widget_1.set_mp_data_length("MP Hands Data Length: " + str(len(self.data_dict[self.mphands.DATA_DICT_ENTRY])))
+        
+        if self.unity.HAND_DATA_DICT_ENTRY in self.data_dict:
+            self.second_row_widget_1.set_mp_data_length("Hands Data Length: " + str(len(self.data_dict[self.unity.HAND_DATA_DICT_ENTRY])))
         else:
-            self.second_row_widget_1.set_mp_data_length("MP Hands Data Length: " + str(0))
-        """
-            
+            self.second_row_widget_1.set_mp_data_length("Hands Data Length: " + str(0))
+        
+        self.second_row_widget_1.set_ball_pos(f"Ball Position: {ball_pos}")    
         self.second_row_widget_1.set_bt_connected_status("Bluetooth Status: " + str(self.teensybt.get_connected_status()))
         self.second_row_widget_1.set_bt_fps("Teensy FPS: " + str(int(self.teensybt.get_fps())) + ", " + str(int(self.teensybt.get_fps_imu())) + ", " + str(int(self.teensybt.get_fps_eit())))
         #self.second_row_widget_1.set_mp_fps("Mediapipe FPS: " + str(int(self.mphands.get_fps())))

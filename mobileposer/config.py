@@ -4,43 +4,35 @@ from enum import Enum, auto
 
 
 class train_hypers:
-    """Hyperparameters for training."""
+    """Training hyperparameters."""
     batch_size = 256
     num_workers = 8
-    num_epochs = 60
+    num_epochs = 100
     accelerator = "gpu"
-    device = 0
+    device = "0"
     lr = 1e-3
-
-
-class finetune_hypers:
-    """Hyperparamters for finetuning."""
-    batch_size = 32
-    num_workers = 8
-    num_epochs = 15
-    accelerator = "gpu"
-    device = 0
-    lr = 5e-5
 
 
 class paths:
     """Relevant paths for MobilePoser. Change as necessary."""
-    root_dir = Path().absolute()
-    checkpoint = root_dir / "checkpoints"
-    smpl_file = root_dir / "smpl/basicmodel_m.pkl"
-    weights_file = root_dir / "checkpoints/weights.pth"
-    raw_amass = Path("/data/projects/Pose/raw/AMASS")           # TODO: replace with your path
-    raw_dip = Path("/data/projects/Pose/raw/DIP_IMU")           # TODO: replace with your path
-    raw_imuposer = Path("/data/projects/Pose/raw/IMUPoser")     # TODO: replace with your path
-    eval_dir = root_dir / "data/processed_datasets/eval"
-    processed_datasets = root_dir / "data/processed_datasets"
-    raw_totalcapture_official = root_dir / "data/raw/TotalCapture/raw"  # TODO: replace with your path
-    calibrated_totalcapture = root_dir / "data/raw/TotalCapture/IMU"  # TODO: replace with your path
+    root_dir = Path().absolute() / "mobileposer"
+    smpl_file = root_dir / 'smpl/basicmodel_m.pkl'
+    #weights_file = root_dir / 'checkpoints/model_finetuned.pth'
+    weights_file = root_dir / "weights.pth"
+    calibration_file = root_dir / "calibration.py"
+    mesh_data = root_dir/ "armdata.mat"
+    
+    raw_data = root_dir / "raw_data"
+    processed_data = root_dir / "processed_data"
+    processed_datasets25 = root_dir / "data/processed_25fps"
+    processed_dev = root_dir / "data/processed_dev"       # subset for fast testing
+    dev_data = root_dir / "data/dev_dataset" # stores data for development testing 
+
 
 class model_config:
     """MobilePoser Model configurations."""
     # device
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # joint set
     n_joints = 5                        # (head, right-wrist, left-wrist, right-hip, left-hip)
@@ -58,18 +50,19 @@ class amass:
     """AMASS dataset information."""
     # device-location combinationsa
     combos = {
-        'lw_rp_h': [0, 3, 4],
-        'rw_rp_h': [1, 3, 4],
-        'lw_lp_h': [0, 2, 4],
-        'rw_lp_h': [1, 2, 4],
-        'lw_lp': [0, 2],
+        # 'lw_rp_h': [0, 3, 4],
+        # 'rw_rp_h': [1, 3, 4],
+        # 'lw_lp_h': [0, 2, 4],
+        # 'rw_lp_h': [1, 2, 4],
+        # 'lw_lp': [0, 2],
         'lw_rp': [0, 3],
         'rw_lp': [1, 2],
         'rw_rp': [1, 3],
-        'lp_h': [2, 4],
-        'rp_h': [3, 4],
-        'lp': [2],
-        'rp': [3],
+        # 'lp_h': [2, 4],
+        # 'rp_h': [3, 4],
+        # 'lp': [2],
+        # 'rp': [3],
+        'rw' : [1]
      }
     acc_scale = 30
     vel_scale = 2
@@ -86,24 +79,32 @@ class amass:
 class datasets:
     """Dataset information."""
     # FPS of data
-    fps = 30
+    fps = 25
 
     # DIP dataset
+    dip_name = "dip"
     dip_test = "dip_test.pt"
     dip_train = "dip_train.pt"
 
     # TotalCapture dataset
-    totalcapture = "totalcapture.pt"
+    totalcapture = "TotalCapture.pt"
+    totalcapture_all = f"totalcapture{fps}.pt"
+    totalcapture_test = "totalcapture_test.pt"
+    totalcapture_train = "totalcapture_train.pt"
 
     # IMUPoser dataset
-    imuposer = "imuposer.pt"
+    imuposer_all = "imuposer.pt"
     imuposer_train = "imuposer_train.pt"
     imuposer_test = "imuposer_test.pt"
+
+    # Datasets to ignore during training
+    train_ignore = [totalcapture_all, totalcapture_test, totalcapture_train,
+                    dip_test, dip_train, imuposer_all]
 
     # Test datasets
     test_datasets = {
         'dip': dip_test,
-        'totalcapture': totalcapture,
+        'totalcapture': totalcapture_all,
         'imuposer': imuposer_test
     }
 
@@ -113,8 +114,8 @@ class datasets:
         'imuposer': imuposer_train
     }
 
-    # AMASS datasets (add more as they become available in AMASS!)
-    amass_datasets = ['ACCAD', 'BioMotionLab_NTroje', 'BMLhandball', 'BMLmovi', 'CMU', 
+    # AMASS datasets
+    amass_datasets = ['ACCAD', 'BioMotionLab_NTroje', 'BMLhandball', 'BMLmovi', 'CMU',
                       'DanceDB', 'DFaust_67', 'EKUT', 'Eyes_Japan_Dataset', 'HUMAN4D',
                       'HumanEva', 'KIT', 'MPI_HDM05', 'MPI_Limits', 'MPI_mosh', 'SFU',
                       'SSM_synced', 'TCD_handMocap', 'TotalCapture', 'Transitions_mocap']

@@ -195,7 +195,7 @@ class IMUManager:
         self.data_dict[self.calibration_data_dict_entry] = [(smpl2imu, device2bone)]
 
         # start streaming data
-        print('\tFinished Calibrating.\nEstimating poses. Press q to quit')
+        print('\tFinished Calibrating.')
         imu_set.start_reading()
 
         # load model

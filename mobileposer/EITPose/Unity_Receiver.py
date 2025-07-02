@@ -134,7 +134,7 @@ class UnityManager:
         self.conn.send(s.encode('utf8'))  
 
     def parse_message(self, data):
-        head, hand, pos, body, _ = data.split('!')
+        head, hand, pos, _ = data.split('!')
         if len(head.split('#')) > 1:
             self.head_pos, self.head_rot = head.split('#')
             self.head_pos = self.head_pos.split(',')
@@ -155,15 +155,7 @@ class UnityManager:
             #print(f"\r{self.ball_pos}\n", end="")
             self.gesture = ball_data[1]
             self.orientation = ball_data[2]
-        body_joints = body.split('#')
-        self.body_pos = []
-        self.body_rot = []
-        if len(body_joints) > 1:
-            #print("yes body!")
-            for idx in range(0,len(body_joints), 2):
-                self.body_pos.append(body_joints[idx].split(','))
-                self.body_rot.append(body_joints[idx+1].split(','))
-        #else:
+        
             #print("no body :(")
 
 
@@ -184,6 +176,7 @@ class UnityManager:
         return self.ball_pos, self.gesture, self.orientation
     def get_recent_body_data(self):
         return self.body_pos, self.body_rot
+
 
     def record_data(self, linux_time):
         if self.hand_data_dict_entry not in self.data_dict.keys():
